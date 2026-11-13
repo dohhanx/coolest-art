@@ -365,15 +365,13 @@ def boat(x, y):
         d = min(half - abs(bx), 18.0 - by)
         c = smoother(-1.5, 1.2, d) * smoother(-1.1, 0.7, by + 0.3)
         if c > 0.0:
-            hull = (0.36, 0.16, 0.07)
-            if by < 2.8:
-                hull = mix((0.96, 0.76, 0.38), hull, clamp(by / 2.8, 0.0, 1.0))
-            hull = mix(hull, (0.10, 0.045, 0.025), clamp((by - 8.0) / 10.0, 0.0, 1.0) * 0.55)
-            ld = math.hypot(bx - 15.0, by - 8.0)
-            if ld < 2.2:
-                hull = (1.0, 0.50, 0.16)
-            elif ld < 7.0:
-                hull = mix(hull, (1.0, 0.55, 0.20), smoother(7.0, 2.2, ld) * 0.40)
+            hull = (0.42, 0.20, 0.09)
+            if by < 2.4:
+                hull = mix((0.95, 0.74, 0.36), hull, clamp(by / 2.4, 0.0, 1.0))
+            hull = mix(hull, (0.22, 0.10, 0.05), clamp((by - 9.0) / 9.0, 0.0, 1.0) * 0.35)
+            ld = math.hypot(bx - 16.0, by - 7.0)
+            if ld < 2.0:
+                hull = (1.0, 0.46, 0.14)
             col, cov = hull, c
     # Mast.
     if -104.0 <= by <= 1.2 and abs(bx) <= 2.2:
@@ -470,9 +468,9 @@ def water_color(x, y):
     halfw = 18.0 + (y - WIN_Y) * 0.042
     shaft = math.exp(-((x - CX) / halfw) ** 2) * math.exp(-(y - WATER_Y) / 210.0)
     col = mix(col, (0.90, 0.66, 0.32), shaft * 0.38)
-    sh = ((x - BOAT_X) / 40.0) ** 2 + ((y - (BOAT_Y + 14.0)) / 8.0) ** 2
+    sh = ((x - BOAT_X) / 26.0) ** 2 + ((y - (BOAT_Y + 15.0)) / 4.5) ** 2
     if sh < 1.0:
-        col = mix(col, (0.003, 0.005, 0.010), (1.0 - sh) * 0.60)
+        col = mix(col, (0.004, 0.006, 0.012), (1.0 - sh) * 0.35)
     bx = x - BOAT_X + math.sin(y * 0.14) * 1.3
     by = y - (BOAT_Y + 16.0)
     if 0.0 <= by <= 48.0 and 0.0 <= bx <= 34.0:
