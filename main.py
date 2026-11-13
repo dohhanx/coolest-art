@@ -1,56 +1,51 @@
 #!/usr/bin/env python3
-"""Baleen Cathedral.
+"""The nave inside a whale.
 
-A frontal whale skull fills the frame and is cropped by it. The mouth is a
-flooded nave: a rose window of gold, amber, wine and teal burns in the throat,
-umber baleen plates hang on either side, and a sailboat on the black water
-gives the skull its scale. Cool light rims the melon. Every warm highlight
-comes from the window.
-
-Python 3.13, standard library only. Fully deterministic.
+A skull fills the frame and is cut off by it. Cold light traces the melon.
+Warm light comes only from a lamp of round glass set in the throat. Baleen
+hangs beside that lamp, black water keeps its echo, and a single hull gives
+the skull a scale. Python standard library, fixed arithmetic, no clock in
+the pixels.
 """
 
 import math
 import os
 import struct
 import sys
-import time
 import zlib
 
-W = H = 1024
-CX = 512.0
-WIN_Y = 470.0
-WIN_R = 124.0
-WATER_Y = 706.0
-BOAT_X = 386.0
-BOAT_Y = 706.0
+SIDE = 1024
+MID = 512.0
+LAMP_Y = 466.0
+LAMP_R = 120.0
+TIDE = 702.0
+HULL_X = 374.0
+HULL_Y = 702.0
 
-# Folded around the vertical: index 0 is the top pane, the last is the bottom.
-OUTER = (
-    (1.00, 0.88, 0.48),
-    (0.98, 0.56, 0.12),
-    (0.66, 0.10, 0.13),
-    (0.14, 0.64, 0.60),
-    (0.92, 0.50, 0.12),
-    (1.00, 0.74, 0.32),
-    (1.00, 0.80, 0.40),
+# Slot zero sits at the top of the lamp. Later slots fold across the vertical.
+OUTER_GLASS = (
+    (1.00, 0.86, 0.46),
+    (0.97, 0.52, 0.11),
+    (0.64, 0.11, 0.14),
+    (0.16, 0.62, 0.58),
+    (0.90, 0.48, 0.13),
+    (0.98, 0.72, 0.34),
+    (1.00, 0.78, 0.42),
 )
-INNER = (
-    (1.00, 0.94, 0.70),
-    (1.00, 0.68, 0.26),
-    (0.20, 0.72, 0.66),
-    (0.78, 0.24, 0.12),
-    (1.00, 0.82, 0.42),
+INNER_GLASS = (
+    (1.00, 0.92, 0.66),
+    (0.98, 0.64, 0.24),
+    (0.22, 0.70, 0.64),
+    (0.76, 0.26, 0.13),
+    (1.00, 0.80, 0.44),
 )
-LEAD = (0.045, 0.028, 0.022)
-
-EYES = (
-    (246.0, 224.0, 56.0, 29.0),
-    (778.0, 224.0, 56.0, 29.0),
+GAZE = (
+    (242.0, 226.0, 54.0, 28.0),
+    (782.0, 226.0, 54.0, 28.0),
 )
 
 
-def clamp(v, lo, hi):
+def bound(v, lo, hi):
     if v < lo:
         return lo
     if v > hi:
@@ -58,502 +53,482 @@ def clamp(v, lo, hi):
     return v
 
 
-def lerp(a, b, t):
-    return a + (b - a) * t
+def span(a, b, t):
+    return a * (1.0 - t) + b * t
 
 
-def mix(c0, c1, t):
-    return (lerp(c0[0], c1[0], t), lerp(c0[1], c1[1], t), lerp(c0[2], c1[2], t))
+def fuse(p, q, t):
+    return (span(p[0], q[0], t), span(p[1], q[1], t), span(p[2], q[2], t))
 
 
-def smoother(edge0, edge1, x):
-    if edge0 == edge1:
-        return 1.0 if x >= edge1 else 0.0
-    t = (x - edge0) / (edge1 - edge0)
-    t = clamp(t, 0.0, 1.0)
-    return t * t * (3.0 - 2.0 * t)
+def ramp(a, b, x):
+    if a == b:
+        return 1.0 if x >= b else 0.0
+    u = (x - a) / (b - a)
+    u = bound(u, 0.0, 1.0)
+    return u * u * (3.0 - 2.0 * u)
 
 
-def hash2(ix, iy):
-    n = (ix * 374761393 + iy * 668265263 + 1442695041) & 0xFFFFFFFF
-    n = (n ^ (n >> 13)) * 1274126177 & 0xFFFFFFFF
+def lattice(ix, iy):
+    n = (ix * 198491317 + iy * 6542989 + 1013904223) & 0xFFFFFFFF
+    n = (n ^ (n >> 13)) * 747796405 & 0xFFFFFFFF
     n = (n ^ (n >> 16)) & 0xFFFFFF
     return n / 16777215.0
 
 
-def noise(x, y, scale):
-    xs = x / scale
-    ys = y / scale
+def mottled(x, y, grain):
+    xs = x / grain
+    ys = y / grain
     xi = math.floor(xs)
     yi = math.floor(ys)
     xf = xs - xi
     yf = ys - yi
     sx = xf * xf * (3.0 - 2.0 * xf)
     sy = yf * yf * (3.0 - 2.0 * yf)
-    n00 = hash2(xi, yi)
-    n10 = hash2(xi + 1, yi)
-    n01 = hash2(xi, yi + 1)
-    n11 = hash2(xi + 1, yi + 1)
-    return lerp(lerp(n00, n10, sx), lerp(n01, n11, sx), sy)
+    n00 = lattice(xi, yi)
+    n10 = lattice(xi + 1, yi)
+    n01 = lattice(xi, yi + 1)
+    n11 = lattice(xi + 1, yi + 1)
+    return span(span(n00, n10, sx), span(n01, n11, sx), sy)
 
 
-def dome_top(x):
-    """Broad melon. The crown is the only outer contour; the flanks run off the frame."""
-    nx = abs(x - CX) / 512.0
-    return 58.0 + 176.0 * (nx ** 2.15)
+def crown(x):
+    """Low wide melon. Only this curve meets the night; the cheeks run off the frame."""
+    nx = abs(x - MID) / float(SIDE)
+    return 62.0 + 186.0 * (nx ** 2.18)
 
 
-def dome_slope(x):
-    nx = abs(x - CX) / 512.0
-    if nx < 1e-4:
+def crown_slope(x):
+    nx = abs(x - MID) / float(SIDE)
+    if nx < 1e-5:
         return 0.0
-    return (176.0 * 2.15 * (nx ** 1.15)) / 512.0
+    return (186.0 * 2.18 * (nx ** 1.18)) / float(SIDE)
 
 
-def roof_y(x):
-    u = (x - CX) / 408.0
-    return 300.0 + 214.0 * u * u
+def palate(x):
+    u = (x - MID) / 404.0
+    return 304.0 + 206.0 * u * u
 
 
-def mouth_half(y):
-    t = (y - 548.0) / 470.0
-    return 436.0 - 64.0 * t * t
-
-
-def chin_y(x):
-    nx = abs(x - CX) / 520.0
+def jaw(x):
+    nx = abs(x - MID) / 516.0
     if nx > 1.0:
         nx = 1.0
-    # Wide U, a whale jaw rather than a pointed shield.
-    return 1012.0 - 176.0 * (nx ** 1.7)
+    return 1010.0 - 168.0 * (nx ** 1.72)
 
 
-def halo(x, y):
-    dx = x - CX
-    dy = y - WIN_Y
-    return math.exp(-(dx * dx + dy * dy) / (2.0 * 176.0 * 176.0))
+def mouth_reach(y):
+    t = (y - 546.0) / 468.0
+    return 432.0 - 60.0 * t * t
 
 
-def sea(x, y):
-    t = clamp(y / (H - 1), 0.0, 1.0)
-    r = lerp(0.010, 0.018, t)
-    g = lerp(0.018, 0.026, t)
-    b = lerp(0.048, 0.058, t)
-    nx = (x - CX) / 512.0
-    ny = (y - 420.0) / 620.0
-    vig = clamp(1.0 - 0.70 * (nx * nx + 0.55 * ny * ny), 0.0, 1.0)
+def lamp_falloff(x, y):
+    dx = x - MID
+    dy = y - LAMP_Y
+    return math.exp(-(dx * dx + dy * dy) / (2.0 * 172.0 * 172.0))
+
+
+def ink(x, y):
+    t = bound(y / (SIDE - 1), 0.0, 1.0)
+    r = span(0.009, 0.017, t)
+    g = span(0.016, 0.024, t)
+    b = span(0.046, 0.056, t)
+    nx = (x - MID) / 512.0
+    ny = (y - 400.0) / 640.0
+    vig = bound(1.0 - 0.68 * (nx * nx + 0.52 * ny * ny), 0.0, 1.0)
     return (r * vig, g * vig, b * vig)
 
 
-def _fold(i, n):
+def fold_slot(i, n):
     i %= n
     half = n // 2
     return i if i <= half else n - i
 
 
-def _pane(col, x, y, ang, ring_r, pane_r, color):
-    pcx = CX + math.sin(ang) * ring_r
-    pcy = WIN_Y - math.cos(ang) * ring_r
-    if abs(x - pcx) > pane_r + 2.0 or abs(y - pcy) > pane_r + 2.0:
-        return col
-    d = math.hypot(x - pcx, y - pcy)
-    if d > pane_r + 1.5:
-        return col
-    cov = smoother(pane_r + 1.35, pane_r - 0.7, d)
-    # Backlit glass: nearly even, a little hotter toward the middle. Not a sphere.
-    glow = 0.78 + 0.22 * clamp(1.0 - d / pane_r, 0.0, 1.0)
+def stamp_roundel(base, x, y, ang, orbit, radius, pigment):
+    px = MID + math.sin(ang) * orbit
+    py = LAMP_Y - math.cos(ang) * orbit
+    if abs(x - px) > radius + 2.0 or abs(y - py) > radius + 2.0:
+        return base
+    d = math.hypot(x - px, y - py)
+    if d > radius + 1.4:
+        return base
+    cover = ramp(radius + 1.3, radius - 0.6, d)
+    # Flat backlit glass, a little hotter in the middle, never a shiny bead.
+    hot = 0.76 + 0.24 * bound(1.0 - d / radius, 0.0, 1.0)
     pane = (
-        clamp(color[0] * glow, 0.0, 1.0),
-        clamp(color[1] * glow, 0.0, 1.0),
-        clamp(color[2] * glow, 0.0, 1.0),
+        bound(pigment[0] * hot, 0.0, 1.0),
+        bound(pigment[1] * hot, 0.0, 1.0),
+        bound(pigment[2] * hot, 0.0, 1.0),
     )
-    if d > pane_r - 2.3:
-        pane = mix(pane, LEAD, smoother(pane_r - 2.3, pane_r - 0.15, d))
-    return mix(col, pane, cov)
+    if d > radius - 2.2:
+        pane = fuse(pane, (0.04, 0.026, 0.02), ramp(radius - 2.2, radius - 0.15, d))
+    return fuse(base, pane, cover)
 
 
-def window_color(x, y):
-    """Rose window as jewels set in lead, not a color wheel. None outside the disk."""
-    dx = x - CX
-    dy = y - WIN_Y
+def lamp_color(x, y):
+    """Roundels in pale stone. None once the point leaves the disk."""
+    dx = x - MID
+    dy = y - LAMP_Y
     r = math.hypot(dx, dy)
-    if r >= WIN_R:
+    if r >= LAMP_R:
         return None
-    if r > WIN_R - 13.5:
-        lip = smoother(WIN_R - 13.5, WIN_R - 10.0, r) * (1.0 - smoother(WIN_R - 6.4, WIN_R - 3.6, r))
-        return mix((0.16, 0.11, 0.07), (1.0, 0.86, 0.52), lip)
-
-    # Dark amber ground so the gaps read as glass, not holes.
-    ground = 0.055 + 0.04 * (1.0 - r / WIN_R)
-    col = (ground * 1.55, ground * 0.72, ground * 0.30)
-    stone = (0.78, 0.62, 0.38)
-    for ring_r, width in ((33.5, 3.3), (68.0, 3.5)):
-        d = abs(r - ring_r)
-        if d < width:
-            col = mix(col, stone, smoother(width, 0.7, d))
+    if r > LAMP_R - 13.0:
+        lip = ramp(LAMP_R - 13.0, LAMP_R - 9.6, r) * (1.0 - ramp(LAMP_R - 6.2, LAMP_R - 3.4, r))
+        return fuse((0.15, 0.10, 0.065), (1.0, 0.85, 0.50), lip)
+    ground = 0.052 + 0.038 * (1.0 - r / LAMP_R)
+    col = (ground * 1.5, ground * 0.70, ground * 0.28)
+    stone = (0.76, 0.60, 0.36)
+    for ring, width in ((33.0, 3.2), (67.0, 3.4)):
+        gap = abs(r - ring)
+        if gap < width:
+            col = fuse(col, stone, ramp(width, 0.65, gap))
     for i in range(8):
         ang = i * (math.tau / 8.0)
-        col = _pane(col, x, y, ang, 49.0, 15.0, INNER[_fold(i, 8)])
+        col = stamp_roundel(col, x, y, ang, 48.0, 14.5, INNER_GLASS[fold_slot(i, 8)])
     for i in range(12):
         ang = i * (math.tau / 12.0)
-        col = _pane(col, x, y, ang, 90.0, 19.0, OUTER[_fold(i, 12)])
-
-    if r < 36.0:
-        core = mix((1.0, 0.74, 0.34), (1.0, 0.99, 0.97), clamp(1.0 - r / 26.0, 0.0, 1.0) ** 0.55)
-        col = mix(col, core, smoother(35.5, 23.0, r))
+        col = stamp_roundel(col, x, y, ang, 88.0, 18.5, OUTER_GLASS[fold_slot(i, 12)])
+    if r < 35.0:
+        core = fuse((1.0, 0.72, 0.32), (1.0, 0.99, 0.96), bound(1.0 - r / 25.0, 0.0, 1.0) ** 0.52)
+        col = fuse(col, core, ramp(34.5, 22.0, r))
     return col
 
 
-def plate_field(x, y):
-    """Wide umber baleen plates. Coverage plus color, or (0, None)."""
-    if y < 280.0 or y > WATER_Y - 8.0:
+def comb(x, y):
+    """Wide umber plates. Returns (coverage, color) or (0, None)."""
+    if y < 286.0 or y > TIDE - 10.0:
         return 0.0, None
-    bow = math.sin(clamp((y - 310.0) / 400.0, 0.0, 1.0) * math.pi) * 8.0
-    sign = 1.0 if x >= CX else -1.0
-    xb = x - sign * bow
-    ax = abs(xb - CX)
-    inner = 158.0
-    pitch = 26.0
+    bow = math.sin(bound((y - 316.0) / 390.0, 0.0, 1.0) * math.pi) * 7.0
+    side = 1.0 if x >= MID else -1.0
+    xb = x - side * bow
+    ax = abs(xb - MID)
+    inner = 156.0
+    step = 27.0
     count = 9
-    outer = inner + (count - 1) * pitch
-    if ax < inner - 4.0 or ax > outer + 10.0:
+    outer = inner + (count - 1) * step
+    if ax < inner - 4.0 or ax > outer + 12.0:
         return 0.0, None
-    i = int((ax - inner) / pitch + 0.5)
-    if i < 0 or i >= count:
+    slot = int((ax - inner) / step + 0.5)
+    if slot < 0 or slot >= count:
         return 0.0, None
-    attach = inner + i * pitch
-    local = ax - attach
-    span = (attach - inner) / (outer - inner)
-    top = roof_y(xb) - 1.0
-    bottom = min(WATER_Y - 22.0, top + lerp(250.0, 320.0, span ** 0.9))
-    if y < top - 2.0 or y > bottom + 12.0:
+    root = inner + slot * step
+    local = ax - root
+    along = (root - inner) / (outer - inner)
+    top = palate(xb) - 1.0
+    tip = min(TIDE - 24.0, top + span(246.0, 312.0, along ** 0.88))
+    if y < top - 2.0 or y > tip + 2.0:
         return 0.0, None
-    t = clamp((y - top) / max(bottom - top, 1.0), 0.0, 1.0)
-    half = lerp(10.4, 5.6, t)
-    cov = smoother(half + 1.9, half - 1.0, abs(local))
-    cov *= smoother(top - 1.6, top + 1.4, y)
-    cov *= smoother(bottom + 2.2, bottom - 2.2, y)
-    # Clear the stone so the window stays a disk.
-    rd = math.hypot(x - CX, y - WIN_Y)
-    cov *= smoother(WIN_R + 8.0, WIN_R + 18.0, rd)
-    if cov <= 0.0:
+    t = bound((y - top) / max(tip - top, 1.0), 0.0, 1.0)
+    half = span(10.2, 5.5, t)
+    cover = ramp(half + 1.85, half - 0.95, abs(local))
+    cover *= ramp(top - 1.5, top + 1.3, y)
+    cover *= ramp(tip + 2.1, tip - 2.0, y)
+    rd = math.hypot(x - MID, y - LAMP_Y)
+    cover *= ramp(LAMP_R + 8.0, LAMP_R + 18.0, rd)
+    if cover <= 0.0:
         return 0.0, None
-
-    light = halo(x, y)
-    face = 0.82 + 0.18 * math.exp(-((y - WIN_Y) / 170.0) ** 2)
+    light = lamp_falloff(x, y)
+    face = 0.80 + 0.20 * math.exp(-((y - LAMP_Y) / 168.0) ** 2)
     body = (
-        (0.24 + 0.14 * light) * face,
-        (0.15 + 0.08 * light) * face,
-        (0.08 + 0.035 * light) * face,
+        (0.23 + 0.13 * light) * face,
+        (0.14 + 0.075 * light) * face,
+        (0.075 + 0.032 * light) * face,
     )
-    # Inner lip faces the window (negative local, toward the centerline).
-    lip = smoother(half - 3.6, half - 0.7, -local)
-    col = mix(body, (0.98, 0.78, 0.42), lip * (0.55 + 0.45 * light))
-    if local > half - 1.6:
-        col = mix(col, (0.03, 0.018, 0.016), smoother(half - 1.6, half - 0.2, local))
+    lip = ramp(half - 3.5, half - 0.65, -local)
+    col = fuse(body, (0.97, 0.76, 0.40), lip * (0.52 + 0.48 * light))
+    if local > half - 1.55:
+        col = fuse(col, (0.028, 0.016, 0.014), ramp(half - 1.55, half - 0.2, local))
     if t < 0.05:
-        col = mix(col, (0.66, 0.50, 0.32), (0.05 - t) / 0.05 * 0.45)
+        col = fuse(col, (0.64, 0.48, 0.30), (0.05 - t) / 0.05 * 0.42)
     if t > 0.88:
-        col = mix(col, (0.78, 0.64, 0.42), (t - 0.88) / 0.12 * 0.55)
-    return cov, col
+        col = fuse(col, (0.76, 0.62, 0.40), (t - 0.88) / 0.12 * 0.5)
+    return cover, col
 
 
-def eye_color(x, y, bone):
+def ivory(x, y):
+    light = lamp_falloff(x, y)
+    amb = math.exp(-((x - MID) ** 2) / (2.0 * 236.0 * 236.0) - ((y - 124.0) ** 2) / (2.0 * 94.0 * 94.0))
+    grain = 0.955 + 0.045 * mottled(x, y, 136.0)
+    pore = (mottled(x, y, 50.0) - 0.5) * 0.028
+    flank = bound(abs(x - MID) / 512.0, 0.0, 1.0)
+    turn = 1.0 - 0.36 * (flank ** 1.32)
+    r = (0.19 + 0.46 * amb + 0.32 * light + pore) * grain * turn
+    g = (0.145 + 0.34 * amb + 0.21 * light + pore * 0.82) * grain * turn
+    b = (0.105 + 0.22 * amb + 0.085 * light + pore * 0.55) * grain * turn
+    for s in (-1.0, 1.0):
+        lobe = math.exp(-((x - (MID + s * 70.0)) ** 2) / (2.0 * 76.0 * 76.0) - ((y - 138.0) ** 2) / (2.0 * 56.0 * 56.0))
+        r += 0.055 * lobe
+        g += 0.042 * lobe
+        b += 0.026 * lobe
+    if 80.0 < y < 280.0:
+        fade = ramp(280.0, 226.0, y) * ramp(80.0, 118.0, y)
+        seam = abs(x - MID)
+        if seam < 2.3:
+            k = 0.38 * fade * (1.0 - seam / 2.3)
+            r = r * (1.0 - k) + 0.05 * k
+            g = g * (1.0 - k) + 0.038 * k
+            b = b * (1.0 - k) + 0.028 * k
+    for ex, ey, rx, ry in GAZE:
+        dxe = (x - ex) / (rx * 1.06)
+        if abs(dxe) < 1.04 and y < ey:
+            ridge = ey - ry - 6.0 - 8.5 * (1.0 - dxe * dxe)
+            d = abs(y - ridge)
+            if d < 6.2:
+                k = (1.0 - d / 6.2) * (1.0 - abs(dxe) / 1.04) * 0.32
+                r += 0.16 * k
+                g += 0.12 * k
+                b += 0.065 * k
+    return (bound(r, 0.0, 1.0), bound(g, 0.0, 1.0), bound(b, 0.0, 1.0))
+
+
+def rims(x, y, col, dist):
+    if 0.0 <= dist < 5.0:
+        t = (1.0 - dist / 5.0) ** 1.5
+        col = fuse(col, (0.80, 0.93, 0.99), t * 0.95)
+    d_roof = palate(x) - y
+    if 0.0 <= d_roof < 7.5:
+        t = (1.0 - d_roof / 7.5) ** 1.05
+        col = fuse(col, (1.0, 0.75, 0.40), t * (0.52 + 0.48 * lamp_falloff(x, y)))
+    d_jaw = y - jaw(x)
+    if 0.0 <= d_jaw < 7.2:
+        t = (1.0 - d_jaw / 7.2) ** 1.08
+        col = fuse(col, (0.95, 0.70, 0.36), t * (0.40 + 0.60 * lamp_falloff(x, y)))
+    d_cheek = mouth_reach(y) - abs(x - MID)
+    if 0.0 <= d_cheek < 6.2 and palate(x) < y < jaw(x):
+        t = 1.0 - d_cheek / 6.2
+        col = fuse(col, (0.92, 0.66, 0.32), t * 0.78 * lamp_falloff(x, y))
+    return col
+
+
+def gaze_over(x, y, bone):
     col = bone
-    for ex, ey, rx, ry in EYES:
-        if abs(x - ex) > rx + 18.0 or abs(y - ey) > ry + 16.0:
+    for ex, ey, rx, ry in GAZE:
+        if abs(x - ex) > rx + 16.0 or abs(y - ey) > ry + 14.0:
             continue
         nx = (x - ex) / rx
         ny = (y - ey) / ry
         p = math.hypot(nx, ny)
         radial = math.hypot(rx * nx, ry * ny) / max(p, 1e-6)
         dist = (1.0 - p) * radial
-        sock = math.hypot((x - ex) / (rx + 22.0), (y - ey) / (ry + 16.0))
+        sock = math.hypot((x - ex) / (rx + 20.0), (y - ey) / (ry + 14.0))
         if sock < 1.0:
-            shade = (1.0 - sock) ** 1.2 * 0.42
+            shade = (1.0 - sock) ** 1.15 * 0.40
             col = (col[0] * (1.0 - shade), col[1] * (1.0 - shade), col[2] * (1.0 - shade))
-        if dist < -2.2:
+        if dist < -2.1:
             continue
-        cov = smoother(-1.35, 1.15, dist)
-        if cov <= 0.0:
+        cover = ramp(-1.3, 1.1, dist)
+        if cover <= 0.0:
             continue
-        lid = smoother(0.05, -0.9, ny)
-        globe = (0.010 + 0.012 * (1.0 - lid), 0.014 + 0.016 * (1.0 - lid), 0.026)
-        if ny > 0.55 and abs(dist) < 3.2:
-            wet = smoother(0.55, 0.88, ny) * smoother(3.2, 0.5, abs(dist))
-            globe = mix(globe, (0.50, 0.58, 0.62), wet * 0.40)
-        toward = 1.0 if ex < CX else -1.0
-        d1 = math.hypot(x - (ex + toward * rx * 0.20), y - (ey + ry * 0.32))
-        d2 = math.hypot(x - (ex - toward * rx * 0.32), y - (ey - ry * 0.36))
-        if d1 < 4.6:
-            globe = mix(globe, (1.0, 0.93, 0.80), smoother(4.6, 1.3, d1))
-        if d2 < 2.8:
-            globe = mix(globe, (0.78, 0.90, 0.96), smoother(2.8, 0.7, d2))
-        col = mix(col, globe, cov)
+        lid = ramp(0.04, -0.88, ny)
+        globe = (0.011 + 0.011 * (1.0 - lid), 0.015 + 0.015 * (1.0 - lid), 0.025)
+        if ny > 0.52 and abs(dist) < 3.0:
+            wet = ramp(0.52, 0.86, ny) * ramp(3.0, 0.45, abs(dist))
+            globe = fuse(globe, (0.48, 0.56, 0.60), wet * 0.36)
+        toward = 1.0 if ex < MID else -1.0
+        d1 = math.hypot(x - (ex + toward * rx * 0.18), y - (ey + ry * 0.30))
+        d2 = math.hypot(x - (ex - toward * rx * 0.30), y - (ey - ry * 0.34))
+        if d1 < 4.4:
+            globe = fuse(globe, (1.0, 0.92, 0.78), ramp(4.4, 1.2, d1))
+        if d2 < 2.6:
+            globe = fuse(globe, (0.76, 0.88, 0.95), ramp(2.6, 0.65, d2))
+        col = fuse(col, globe, cover)
     return col
 
 
-def bone_color(x, y):
-    h = halo(x, y)
-    amb = math.exp(-((x - CX) ** 2) / (2.0 * 240.0 * 240.0) - ((y - 128.0) ** 2) / (2.0 * 96.0 * 96.0))
-    n = 0.95 + 0.05 * noise(x, y, 140.0)
-    pore = (noise(x, y, 52.0) - 0.5) * 0.030
-    flank = clamp(abs(x - CX) / 512.0, 0.0, 1.0)
-    turn = 1.0 - 0.38 * (flank ** 1.35)
-    r = (0.20 + 0.48 * amb + 0.34 * h + pore) * n * turn
-    g = (0.15 + 0.36 * amb + 0.22 * h + pore * 0.85) * n * turn
-    b = (0.11 + 0.24 * amb + 0.09 * h + pore * 0.6) * n * turn
-    # Two melon lobes and a thin frontal suture between them.
-    for s in (-1.0, 1.0):
-        lob = math.exp(-((x - (CX + s * 72.0)) ** 2) / (2.0 * 78.0 * 78.0) - ((y - 142.0) ** 2) / (2.0 * 58.0 * 58.0))
-        r += 0.06 * lob
-        g += 0.045 * lob
-        b += 0.028 * lob
-    if 78.0 < y < 286.0:
-        fade = smoother(286.0, 230.0, y) * smoother(78.0, 120.0, y)
-        s = abs(x - CX)
-        if s < 2.4:
-            k = 0.40 * fade * (1.0 - s / 2.4)
-            r = r * (1.0 - k) + 0.05 * k
-            g = g * (1.0 - k) + 0.04 * k
-            b = b * (1.0 - k) + 0.03 * k
-    # Brow ridge over each eye.
-    for ex, ey, rx, ry in EYES:
-        dxe = (x - ex) / (rx * 1.08)
-        if abs(dxe) < 1.05 and y < ey:
-            ridge = ey - ry - 6.0 - 9.0 * (1.0 - dxe * dxe)
-            d = abs(y - ridge)
-            if d < 6.5:
-                k = (1.0 - d / 6.5) * (1.0 - abs(dxe) / 1.05) * 0.34
-                r += 0.18 * k
-                g += 0.13 * k
-                b += 0.07 * k
-    return (clamp(r, 0.0, 1.0), clamp(g, 0.0, 1.0), clamp(b, 0.0, 1.0))
-
-
-def apply_bone_rims(x, y, col, dist_out):
-    if 0.0 <= dist_out < 5.2:
-        t = (1.0 - dist_out / 5.2) ** 1.55
-        col = mix(col, (0.82, 0.94, 0.99), t * 0.96)
-    d_palate = roof_y(x) - y
-    if 0.0 <= d_palate < 8.0:
-        t = (1.0 - d_palate / 8.0) ** 1.05
-        col = mix(col, (1.0, 0.76, 0.42), t * (0.55 + 0.45 * halo(x, y)))
-    d_chin = y - chin_y(x)
-    if 0.0 <= d_chin < 7.5:
-        t = (1.0 - d_chin / 7.5) ** 1.1
-        col = mix(col, (0.96, 0.72, 0.38), t * (0.42 + 0.58 * halo(x, y)))
-    d_cheek = mouth_half(y) - abs(x - CX)
-    if 0.0 <= d_cheek < 6.5 and roof_y(x) < y < chin_y(x):
-        t = 1.0 - d_cheek / 6.5
-        col = mix(col, (0.94, 0.68, 0.34), t * 0.80 * halo(x, y))
-    return col
-
-
-def boat(x, y):
-    """Sailboat. Returns (color, coverage). Coverage 0 when the pixel misses."""
-    bx = x - BOAT_X
-    by = y - BOAT_Y
-    if bx < -42.0 or bx > 52.0 or by < -118.0 or by > 26.0:
+def vessel(x, y):
+    """Wood hull on the tide line, sail above it. (color, coverage)."""
+    bx = x - HULL_X
+    by = y - HULL_Y
+    if bx < -44.0 or bx > 50.0 or by < -116.0 or by > 24.0:
         return None, 0.0
     col = (0.0, 0.0, 0.0)
-    cov = 0.0
-    # Hull sits on the waterline: visible wood, a gold gunwale, a small lantern.
-    if -1.2 <= by <= 20.0 and abs(bx) < 40.0:
-        t = clamp(by / 18.0, 0.0, 1.0)
-        half = 36.0 * (1.0 - t ** 0.58)
-        d = min(half - abs(bx), 18.0 - by)
-        c = smoother(-1.5, 1.2, d) * smoother(-1.1, 0.7, by + 0.3)
+    cover = 0.0
+    if -1.1 <= by <= 19.0 and abs(bx) < 40.0:
+        t = bound(by / 17.5, 0.0, 1.0)
+        half = 34.0 * (1.0 - t ** 0.56)
+        d = min(half - abs(bx), 17.5 - by)
+        c = ramp(-1.45, 1.15, d) * ramp(-1.05, 0.65, by + 0.25)
         if c > 0.0:
-            hull = (0.42, 0.20, 0.09)
-            if by < 2.4:
-                hull = mix((0.95, 0.74, 0.36), hull, clamp(by / 2.4, 0.0, 1.0))
-            hull = mix(hull, (0.22, 0.10, 0.05), clamp((by - 9.0) / 9.0, 0.0, 1.0) * 0.35)
-            ld = math.hypot(bx - 16.0, by - 7.0)
-            if ld < 2.0:
-                hull = (1.0, 0.46, 0.14)
-            col, cov = hull, c
-    # Mast.
-    if -104.0 <= by <= 1.2 and abs(bx) <= 2.2:
-        c = smoother(2.2, 0.35, abs(bx))
-        if c > cov:
-            col, cov = (0.08, 0.05, 0.035), c
-    # Sail, lit on the side that faces the window. It ends above the waterline.
-    y0, y1 = -104.0, -3.0
-    if y0 - 2.0 <= by <= y1 + 2.0 and -2.0 <= bx <= 46.0:
-        t = clamp((by - y0) / (y1 - y0), 0.0, 1.0)
-        reach = 1.6 + 39.0 * t
-        d = min(reach - bx, bx - 0.6, by - y0, y1 - by)
-        c = smoother(-1.55, 1.15, d)
+            hull = (0.40, 0.19, 0.085)
+            if by < 2.3:
+                hull = fuse((0.94, 0.73, 0.36), hull, bound(by / 2.3, 0.0, 1.0))
+            hull = fuse(hull, (0.20, 0.09, 0.045), bound((by - 8.5) / 9.0, 0.0, 1.0) * 0.32)
+            ld = math.hypot(bx - 15.0, by - 6.5)
+            if ld < 1.9:
+                hull = (1.0, 0.45, 0.13)
+            col, cover = hull, c
+    if -102.0 <= by <= 1.0 and abs(bx) <= 2.1:
+        c = ramp(2.1, 0.3, abs(bx))
+        if c > cover:
+            col, cover = (0.075, 0.048, 0.032), c
+    y0, y1 = -102.0, -3.2
+    if y0 - 2.0 <= by <= y1 + 2.0 and -2.0 <= bx <= 44.0:
+        t = bound((by - y0) / (y1 - y0), 0.0, 1.0)
+        reach = 1.5 + 37.0 * t
+        d = min(reach - bx, bx - 0.55, by - y0, y1 - by)
+        c = ramp(-1.5, 1.1, d)
         if c > 0.0:
-            facing = 0.74 + 0.26 * clamp(bx / 39.0, 0.0, 1.0)
-            facing *= 0.90 + 0.10 * (1.0 - t)
-            if abs(by + 48.0) < 0.85:
+            facing = 0.73 + 0.27 * bound(bx / 37.0, 0.0, 1.0)
+            facing *= 0.91 + 0.09 * (1.0 - t)
+            if abs(by + 46.0) < 0.8:
                 facing *= 0.86
-            sail = (0.99 * facing, 0.91 * facing, 0.70 * facing)
-            if c > cov:
-                col, cov = sail, c
-    return (col if cov > 0.0 else None), cov
+            sail = (0.98 * facing, 0.90 * facing, 0.68 * facing)
+            if c > cover:
+                col, cover = sail, c
+    return (col if cover > 0.0 else None), cover
 
 
-def outline_dist(x, y):
-    top = dome_top(x)
-    slope = dome_slope(x)
-    return (y - top) / math.sqrt(1.0 + slope * slope), top
+def skull_gap(x, y):
+    top = crown(x)
+    slope = crown_slope(x)
+    return (y - top) / math.sqrt(1.0 + slope * slope)
 
 
-def surface(x, y):
-    """Sea, skull, mouth, baleen and window. No water and no boat."""
-    if y < -4.0 or y > H + 4.0 or x < -4.0 or x > W + 4.0:
-        return sea(clamp(x, 0.0, W - 1.0), clamp(y, 0.0, H - 1.0))
-    dist_out, top = outline_dist(x, y)
-    if dist_out <= -1.8:
-        return sea(x, y)
-
-    ry = roof_y(x)
-    cy = chin_y(x)
-    in_mouth = (y >= ry) and (y <= cy) and (abs(x - CX) <= mouth_half(y) + 1.5)
-    if in_mouth:
-        h = halo(x, y)
-        col = (0.020 + 0.055 * h, 0.009 + 0.028 * h, 0.012 + 0.014 * h)
-        dx = x - CX
-        dy = y - WIN_Y
+def dry(x, y):
+    """Night, bone, throat, comb, and lamp. No water and no boat."""
+    if y < -4.0 or y > SIDE + 4.0 or x < -4.0 or x > SIDE + 4.0:
+        return ink(bound(x, 0.0, SIDE - 1.0), bound(y, 0.0, SIDE - 1.0))
+    dist = skull_gap(x, y)
+    if dist <= -1.7:
+        return ink(x, y)
+    roof = palate(x)
+    chin = jaw(x)
+    in_throat = (y >= roof) and (y <= chin) and (abs(x - MID) <= mouth_reach(y) + 1.4)
+    if in_throat:
+        light = lamp_falloff(x, y)
+        col = (0.018 + 0.05 * light, 0.008 + 0.026 * light, 0.011 + 0.013 * light)
+        dx = x - MID
+        dy = y - LAMP_Y
         rr = math.hypot(dx, dy)
-        if y > WIN_Y and abs(dx) < 150.0:
-            halfw = 18.0 + (y - WIN_Y) * 0.042
+        if y > LAMP_Y and abs(dx) < 146.0:
+            halfw = 17.0 + (y - LAMP_Y) * 0.040
             shaft = math.exp(-(dx / halfw) ** 2)
-            fall = math.exp(-(y - WIN_Y) / 360.0)
-            col = mix(col, (1.0, 0.78, 0.42), shaft * fall * 0.50)
-        if rr > WIN_R and abs(dx) < 140.0:
+            fall = math.exp(-(y - LAMP_Y) / 350.0)
+            col = fuse(col, (1.0, 0.77, 0.40), shaft * fall * 0.48)
+        if rr > LAMP_R and abs(dx) < 136.0:
             up = math.atan2(dx, -dy)
             ray = (0.5 + 0.5 * math.cos(up * 12.0)) ** 8
-            ray *= math.exp(-(rr - WIN_R) / 240.0)
-            col = mix(col, (1.0, 0.82, 0.50), ray * 0.07)
-        pcov, pcol = plate_field(x, y)
+            ray *= math.exp(-(rr - LAMP_R) / 230.0)
+            col = fuse(col, (1.0, 0.80, 0.48), ray * 0.065)
+        pcov, pcol = comb(x, y)
         if pcov > 0.0:
-            col = mix(col, pcol, pcov)
-        wc = window_color(x, y)
-        if wc is not None:
-            wc_cov = smoother(WIN_R + 1.15, WIN_R - 1.25, rr)
-            col = mix(col, wc, wc_cov)
-        elif rr < WIN_R + 32.0:
-            glow = smoother(WIN_R + 32.0, WIN_R + 1.0, rr)
-            col = mix(col, (1.0, 0.80, 0.46), glow * 0.42)
+            col = fuse(col, pcol, pcov)
+        glass = lamp_color(x, y)
+        if glass is not None:
+            col = fuse(col, glass, ramp(LAMP_R + 1.1, LAMP_R - 1.2, rr))
+        elif rr < LAMP_R + 30.0:
+            glow = ramp(LAMP_R + 30.0, LAMP_R + 1.0, rr)
+            col = fuse(col, (1.0, 0.78, 0.44), glow * 0.40)
     else:
-        col = bone_color(x, y)
-        col = apply_bone_rims(x, y, col, dist_out)
-        col = eye_color(x, y, col)
-
-    if dist_out < 2.4:
-        col = mix(sea(x, y), col, smoother(-1.45, 1.45, dist_out))
+        col = ivory(x, y)
+        col = rims(x, y, col, dist)
+        col = gaze_over(x, y, col)
+    if dist < 2.3:
+        col = fuse(ink(x, y), col, ramp(-1.4, 1.4, dist))
     return col
 
 
-def water_color(x, y):
-    depth = (y - WATER_Y) / 280.0
-    wob = math.sin(x * 0.040 + y * 0.105) * 5.2 + math.sin(x * 0.015 - y * 0.046) * 2.0
-    sx = x + math.sin(y * 0.052) * 3.2
-    sy = (WATER_Y - (y - WATER_Y)) + wob
-    if sy > WATER_Y - 3.0:
-        sy = WATER_Y - 3.0
-    reflected = surface(sx, sy)
-    fade = math.exp(-depth * 1.05)
-    ref = (reflected[0] * 0.40 * fade, reflected[1] * 0.50 * fade, reflected[2] * 0.62 * fade)
-    rip = math.sin(y * 0.62 + math.sin(x * 0.021) * 2.0)
+def lagoon(x, y):
+    depth = (y - TIDE) / 276.0
+    wob = math.sin(x * 0.038 + y * 0.10) * 4.8 + math.sin(x * 0.014 - y * 0.044) * 1.8
+    sx = x + math.sin(y * 0.05) * 3.0
+    sy = (TIDE - (y - TIDE)) + wob
+    if sy > TIDE - 3.0:
+        sy = TIDE - 3.0
+    reflected = dry(sx, sy)
+    fade = math.exp(-depth * 1.02)
+    ref = (reflected[0] * 0.38 * fade, reflected[1] * 0.48 * fade, reflected[2] * 0.60 * fade)
+    rip = math.sin(y * 0.58 + math.sin(x * 0.02) * 1.8)
     col = (
-        clamp(0.010 + ref[0], 0.0, 1.0),
-        clamp(0.018 + ref[1], 0.0, 1.0),
-        clamp(0.038 + 0.010 * (0.5 + 0.5 * rip) + ref[2], 0.0, 1.0),
+        bound(0.009 + ref[0], 0.0, 1.0),
+        bound(0.016 + ref[1], 0.0, 1.0),
+        bound(0.036 + 0.009 * (0.5 + 0.5 * rip) + ref[2], 0.0, 1.0),
     )
-    halfw = 18.0 + (y - WIN_Y) * 0.042
-    shaft = math.exp(-((x - CX) / halfw) ** 2) * math.exp(-(y - WATER_Y) / 210.0)
-    col = mix(col, (0.90, 0.66, 0.32), shaft * 0.38)
-    sh = ((x - BOAT_X) / 26.0) ** 2 + ((y - (BOAT_Y + 15.0)) / 4.5) ** 2
+    halfw = 17.0 + (y - LAMP_Y) * 0.040
+    shaft = math.exp(-((x - MID) / halfw) ** 2) * math.exp(-(y - TIDE) / 200.0)
+    col = fuse(col, (0.88, 0.64, 0.30), shaft * 0.36)
+    sh = ((x - HULL_X) / 24.0) ** 2 + ((y - (HULL_Y + 14.0)) / 4.2) ** 2
     if sh < 1.0:
-        col = mix(col, (0.004, 0.006, 0.012), (1.0 - sh) * 0.35)
-    bx = x - BOAT_X + math.sin(y * 0.14) * 1.3
-    by = y - (BOAT_Y + 16.0)
-    if 0.0 <= by <= 48.0 and 0.0 <= bx <= 34.0:
-        reach = 32.0 * (by / 48.0)
+        col = fuse(col, (0.004, 0.006, 0.011), (1.0 - sh) * 0.32)
+    bx = x - HULL_X + math.sin(y * 0.13) * 1.2
+    by = y - (HULL_Y + 15.0)
+    if 0.0 <= by <= 44.0 and 0.0 <= bx <= 32.0:
+        reach = 30.0 * (by / 44.0)
         if bx < reach:
-            a = 0.28 * (1.0 - by / 48.0) * smoother(reach + 0.2, reach - 1.2, bx)
-            col = mix(col, (0.75, 0.62, 0.42), a)
+            a = 0.26 * (1.0 - by / 44.0) * ramp(reach + 0.2, reach - 1.1, bx)
+            col = fuse(col, (0.72, 0.60, 0.40), a)
     return col
 
 
-def shade(x, y):
-    dist_out, top = outline_dist(x, y)
-    ry = roof_y(x)
-    cy = chin_y(x)
-    in_mouth = dist_out > -1.2 and (y >= ry) and (y <= cy + 2.0) and (abs(x - CX) <= mouth_half(y) + 2.0)
-    if in_mouth and y >= WATER_Y - 1.6 and y < cy:
-        water_cov = smoother(WATER_Y - 1.5, WATER_Y + 1.15, y)
-        jaw_cov = smoother(cy - 1.15, cy + 1.35, y)
-        col = mix(surface(x, y), water_color(x, y), water_cov * (1.0 - jaw_cov))
-        if jaw_cov > 0.0:
-            bone = apply_bone_rims(x, y, bone_color(x, y), max(dist_out, 4.0))
-            col = mix(col, bone, jaw_cov)
+def paint(x, y):
+    dist = skull_gap(x, y)
+    roof = palate(x)
+    chin = jaw(x)
+    in_throat = dist > -1.1 and (y >= roof) and (y <= chin + 2.0) and (abs(x - MID) <= mouth_reach(y) + 2.0)
+    if in_throat and y >= TIDE - 1.5 and y < chin:
+        water = ramp(TIDE - 1.45, TIDE + 1.1, y)
+        bone = ramp(chin - 1.1, chin + 1.3, y)
+        col = fuse(dry(x, y), lagoon(x, y), water * (1.0 - bone))
+        if bone > 0.0:
+            jaw_col = rims(x, y, ivory(x, y), max(dist, 4.0))
+            col = fuse(col, jaw_col, bone)
     else:
-        col = surface(x, y)
-
-    dline = abs(y - WATER_Y)
-    if dline < 2.0 and in_mouth and y < cy - 6.0:
-        shine = math.exp(-((x - CX) / 210.0) ** 2)
-        col = mix(col, (1.0, 0.88, 0.58), (1.0 - dline / 2.0) * shine * 0.70)
-
-    bcol, bcov = boat(x, y)
+        col = dry(x, y)
+    dline = abs(y - TIDE)
+    if dline < 1.9 and in_throat and y < chin - 6.0:
+        shine = math.exp(-((x - MID) / 206.0) ** 2)
+        col = fuse(col, (1.0, 0.86, 0.56), (1.0 - dline / 1.9) * shine * 0.66)
+    bcol, bcov = vessel(x, y)
     if bcov > 0.0:
-        col = mix(col, bcol, bcov)
+        col = fuse(col, bcol, bcov)
     return col
 
 
-def encode(v):
-    return int(clamp(v, 0.0, 1.0) * 255.0 + 0.5)
+def to_byte(v):
+    return int(bound(v, 0.0, 1.0) * 255.0 + 0.5)
 
 
-def render():
-    img = bytearray(W * H * 3)
-    mv = memoryview(img)
+def build():
+    buf = bytearray(SIDE * SIDE * 3)
+    view = memoryview(buf)
     i = 0
-    for y in range(H):
+    for y in range(SIDE):
         yy = float(y)
-        for x in range(W):
-            r, g, b = shade(float(x), yy)
-            mv[i] = encode(r)
-            mv[i + 1] = encode(g)
-            mv[i + 2] = encode(b)
+        for x in range(SIDE):
+            r, g, b = paint(float(x), yy)
+            view[i] = to_byte(r)
+            view[i + 1] = to_byte(g)
+            view[i + 2] = to_byte(b)
             i += 3
-    return img
+    return buf
 
 
-def _chunk(tag, data):
+def png_chunk(tag, payload):
     crc = zlib.crc32(tag)
-    crc = zlib.crc32(data, crc) & 0xFFFFFFFF
-    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
+    crc = zlib.crc32(payload, crc) & 0xFFFFFFFF
+    return struct.pack(">I", len(payload)) + tag + payload + struct.pack(">I", crc)
 
 
-def write_png(path, img):
+def save_png(path, buf):
     raw = bytearray()
-    stride = W * 3
-    for y in range(H):
+    stride = SIDE * 3
+    for y in range(SIDE):
         raw.append(0)
-        raw.extend(img[y * stride:(y + 1) * stride])
-    ihdr = struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0)
-    png = b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr) + _chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + _chunk(b"IEND", b"")
-    with open(path, "wb") as f:
-        f.write(png)
-    return len(png)
+        raw.extend(buf[y * stride:(y + 1) * stride])
+    header = struct.pack(">IIBBBBB", SIDE, SIDE, 8, 2, 0, 0, 0)
+    blob = b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", header) + png_chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + png_chunk(b"IEND", b"")
+    with open(path, "wb") as handle:
+        handle.write(blob)
+    return len(blob)
 
 
 def main():
-    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, "entry.png")
-    t0 = time.perf_counter()
-    img = render()
-    size = write_png(path, img)
-    dt = time.perf_counter() - t0
-    print(f"wrote {path} {W}x{H} {size} bytes in {dt:.2f}s", file=sys.stderr)
+    folder = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "entry.png")
+    size = save_png(path, build())
+    print(f"{path} {SIDE}x{SIDE} {size}", file=sys.stderr)
 
 
 if __name__ == "__main__":
